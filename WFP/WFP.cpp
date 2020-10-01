@@ -8,6 +8,7 @@
 
 #pragma comment(lib, "Rpcrt4.lib")
 
+const wchar_t* APP_PATH = L"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 
 // Firewallエンジン
 HANDLE g_hEngine = nullptr;
@@ -127,11 +128,26 @@ DWORD AddFilter(void)
     fwpFilter.displayData.name = const_cast<wchar_t*>(L"ALLBlock");
     fwpFilter.displayData.description = const_cast<wchar_t*>(L"Filter to block all outbound connections.");
     
+    FWP_BYTE_BLOB* fwpAppBlob = nullptr;
+    ret = FwpmGetAppIdFromFileName0(APP_PATH, &fwpAppBlob);
+    if (ret != ERROR_SUCCESS)
+    {
+        std::cerr << "FwpmGetAppIdFromFileName0 failed with error: " << ret << std::endl;
+        return ret;
+    }
+
+    FWPM_FILTER_CONDITION0 fwpConditions;
+    fwpConditions.fieldKey = FWPM_CONDITION_ALE_APP_ID;
+    fwpConditions.matchType = FWP_MATCH_NOT_EQUAL;
+    fwpConditions.conditionValue.type = FWP_BYTE_BLOB_TYPE;
+    fwpConditions.conditionValue.byteBlob = fwpAppBlob;
     //numFilterConditionsを０に指定するとすべての通信を遮断
-    fwpFilter.numFilterConditions = 0;
+    fwpFilter.numFilterConditions = 1;
+    fwpFilter.filterCondition = &fwpConditions;
 
     std::cerr << "Adding filter\n";
     ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &g_filterID);
+    FwpmFreeMemory0((void**)&fwpAppBlob);
     return ret;
 }
 
