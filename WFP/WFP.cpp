@@ -16,8 +16,8 @@ HANDLE g_hEngine = nullptr;
 GUID g_subLayerGUID = { 0 };
 
 //filterID
-UINT64 g_filterID = 0;
-
+UINT64 g_filterIDv4 = 0;
+UINT64 g_filterIDv6 = 0;
 
 //プロトタイプ宣言
 DWORD AddSubLayer(void);
@@ -131,7 +131,9 @@ DWORD AddFilter(void)
     fwpFilter.numFilterConditions = 0;
 
     std::cerr << "Adding filter\n";
-    ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &g_filterID);
+    ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &g_filterIDv4);
+    fwpFilter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V6;
+    ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &g_filterIDv6);
     return ret;
 }
 
@@ -147,7 +149,8 @@ DWORD RemoveSubLayer(void)
 DWORD RemoveFilter(void)
 {
     std::cerr << "Removing Filter\n";
-    DWORD ret = FwpmFilterDeleteById0(g_hEngine, g_filterID);
+    DWORD ret = FwpmFilterDeleteById0(g_hEngine, g_filterIDv4);
+    ret = FwpmFilterDeleteById0(g_hEngine, g_filterIDv6);
     return ret;
 
 }
