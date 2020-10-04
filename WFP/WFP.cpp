@@ -1,11 +1,14 @@
-﻿
+﻿#include <WinSock2.h>
+#include <WS2tcpip.h>
 #include <iostream>
 #include <Windows.h>
 #include <conio.h>
+#include <string>
 
 #include <fwpmu.h>
 #pragma comment (lib,"fwpuclnt.lib")
 
+#pragma comment(lib,"ws2_32.lib")
 #pragma comment(lib, "Rpcrt4.lib")
 
 
@@ -17,13 +20,15 @@ GUID g_subLayerGUID = { 0 };
 
 //filterID
 UINT64 g_filterIDv4 = 0;
-UINT64 g_filterIDv6 = 0;
 
 //プロトタイプ宣言
 DWORD AddSubLayer(void);
 DWORD RemoveSubLayer(void);
 DWORD AddFilter(void);
 DWORD RemoveFilter(void);
+
+std::string strIpAddr = "IP address string format";
+
 
 int main()
 {
@@ -113,6 +118,18 @@ DWORD AddFilter(void)
 {
     DWORD ret = ERROR_BAD_COMMAND;
 
+    WSADATA wsaData;
+    ret = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (ret != ERROR_SUCCESS)
+    {
+        std::cerr << "WSAStartup failed with error: " << ret << std::endl;
+        return ret;
+    }
+
+    in_addr hexAddr;
+    inet_pton(AF_INET, strIpAddr.c_str(), &hexAddr);
+    WSACleanup();
+
     FWPM_FILTER0 fwpFilter = { 0 };
 
     fwpFilter.subLayerKey = g_subLayerGUID;
@@ -124,16 +141,29 @@ DWORD AddFilter(void)
     fwpFilter.action.type = FWP_ACTION_BLOCK;
 
     fwpFilter.weight.type = FWP_EMPTY;
-    fwpFilter.displayData.name = const_cast<wchar_t*>(L"ALLBlock");
-    fwpFilter.displayData.description = const_cast<wchar_t*>(L"Filter to block all outbound connections.");
+    fwpFilter.displayData.name = const_cast<wchar_t*>(L"IPv4Block");
+    fwpFilter.displayData.description = const_cast<wchar_t*>(L"Filter to block specific outbound connections.");
     
     //numFilterConditionsを０に指定するとすべての通信を遮断
-    fwpFilter.numFilterConditions = 0;
+    fwpFilter.numFilterConditions = 1;
+
+    FWPM_FILTER_CONDITION0 fwpCondition = { 0 };
+    FWP_V4_ADDR_AND_MASK fwpAddrMask = { 0 };
+
+    fwpCondition.fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
+    fwpCondition.matchType = FWP_MATCH_EQUAL;
+    fwpCondition.conditionValue.type = FWP_V4_ADDR_MASK;
+    fwpCondition.conditionValue.v4AddrMask = &fwpAddrMask;
+
+    //ホストオーダーでIPを登録
+    fwpAddrMask.addr = ntohl(hexAddr.S_un.S_addr);
+    fwpAddrMask.mask = 0xffffffff;
+
+    fwpFilter.filterCondition = &fwpCondition;
+
 
     std::cerr << "Adding filter\n";
     ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &g_filterIDv4);
-    fwpFilter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V6;
-    ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &g_filterIDv6);
     return ret;
 }
 
@@ -150,7 +180,6 @@ DWORD RemoveFilter(void)
 {
     std::cerr << "Removing Filter\n";
     DWORD ret = FwpmFilterDeleteById0(g_hEngine, g_filterIDv4);
-    ret = FwpmFilterDeleteById0(g_hEngine, g_filterIDv6);
     return ret;
 
 }
