@@ -4,12 +4,21 @@
 #include <Windows.h>
 #include <conio.h>
 #include <string>
+#include <vector>
+#include <stdint.h>
 
 #include <fwpmu.h>
 #pragma comment (lib,"fwpuclnt.lib")
 
 #pragma comment(lib,"ws2_32.lib")
 #pragma comment(lib, "Rpcrt4.lib")
+
+
+typedef struct
+{
+    uint32_t hexAddr;
+    UINT64 filterID;
+} FILTER_ADDR_INFO;
 
 
 // Firewallエンジン
@@ -21,14 +30,23 @@ GUID g_subLayerGUID = { 0 };
 //filterID
 UINT64 g_filterIDv4 = 0;
 
+//filter conditionに指定するIPアドレスリスト
+//stringフォーマットのIPアドレス
+std::vector<std::string> g_vecsAddr =
+{
+    std::string("192.218.88.180"),
+    std::string("76.74.234.210"),
+};
+
+//
+std::vector<FILTER_ADDR_INFO> g_vecFilterAddrInfo;
+
 //プロトタイプ宣言
 DWORD AddSubLayer(void);
 DWORD RemoveSubLayer(void);
 DWORD AddFilter(void);
 DWORD RemoveFilter(void);
-
-std::string strIpAddr = "IP address string format";
-
+DWORD BuildFilterAddrInfo(std::vector<std::string> vecsAddr);
 
 int main()
 {
@@ -114,10 +132,9 @@ DWORD AddSubLayer(void)
 
 }
 
-DWORD AddFilter(void)
+DWORD BuildFilterAddrInfo(std::vector<std::string> vecsAddr)
 {
     DWORD ret = ERROR_BAD_COMMAND;
-
     WSADATA wsaData;
     ret = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (ret != ERROR_SUCCESS)
@@ -126,44 +143,75 @@ DWORD AddFilter(void)
         return ret;
     }
 
-    in_addr hexAddr;
-    inet_pton(AF_INET, strIpAddr.c_str(), &hexAddr);
+    for (auto& elem : vecsAddr)
+    {
+        FILTER_ADDR_INFO addrInfo;
+        in_addr hexAddr;
+        int iRet = inet_pton(AF_INET, elem.c_str(), &hexAddr);
+        if (iRet != 1)
+        {
+            std::cerr << "inet_pton failed with error: " << GetLastError() << std::endl;
+            WSACleanup();
+            return ERROR_BAD_COMMAND;
+        }
+        addrInfo.hexAddr = ntohl(hexAddr.S_un.S_addr);
+        g_vecFilterAddrInfo.push_back(addrInfo);
+    }
     WSACleanup();
+    return ERROR_SUCCESS;
+}
 
-    FWPM_FILTER0 fwpFilter = { 0 };
+DWORD AddFilter(void)
+{
+    DWORD ret = ERROR_BAD_COMMAND;
 
-    fwpFilter.subLayerKey = g_subLayerGUID;
+    ret = BuildFilterAddrInfo(g_vecsAddr);
+    if (ret != ERROR_SUCCESS)
+    {
+        std::cerr << "BuildFilterAddrInfo failed with error: " << ret << std::endl;
+        return ret;
+    }
+    for (auto& elem : g_vecFilterAddrInfo)
+    {
+        FWPM_FILTER0 fwpFilter = { 0 };
+        FWPM_FILTER_CONDITION0 fwpCondition = { 0 };
+        FWP_V4_ADDR_AND_MASK fwpAddrMask = { 0 };
 
-    //filterの種類を指定
-    //https://docs.microsoft.com/en-us/windows/win32/fwp/management-filtering-layer-identifiers-
-    fwpFilter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
+        fwpFilter.subLayerKey = g_subLayerGUID;
 
-    fwpFilter.action.type = FWP_ACTION_BLOCK;
+        //filterの種類を指定
+        //https://docs.microsoft.com/en-us/windows/win32/fwp/management-filtering-layer-identifiers-
+        fwpFilter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
 
-    fwpFilter.weight.type = FWP_EMPTY;
-    fwpFilter.displayData.name = const_cast<wchar_t*>(L"IPv4Block");
-    fwpFilter.displayData.description = const_cast<wchar_t*>(L"Filter to block specific outbound connections.");
-    
-    //numFilterConditionsを０に指定するとすべての通信を遮断
-    fwpFilter.numFilterConditions = 1;
+        fwpFilter.action.type = FWP_ACTION_BLOCK;
+        fwpFilter.weight.type = FWP_EMPTY;
 
-    FWPM_FILTER_CONDITION0 fwpCondition = { 0 };
-    FWP_V4_ADDR_AND_MASK fwpAddrMask = { 0 };
+        fwpFilter.displayData.name = const_cast<wchar_t*>(L"IPv4Block");
+        fwpFilter.displayData.description = const_cast<wchar_t*>(L"Filter to block specific outbound connections.");
 
-    fwpCondition.fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
-    fwpCondition.matchType = FWP_MATCH_EQUAL;
-    fwpCondition.conditionValue.type = FWP_V4_ADDR_MASK;
-    fwpCondition.conditionValue.v4AddrMask = &fwpAddrMask;
+        fwpFilter.numFilterConditions = 1;
+        fwpFilter.filterCondition = &fwpCondition;
 
-    //ホストオーダーでIPを登録
-    fwpAddrMask.addr = ntohl(hexAddr.S_un.S_addr);
-    fwpAddrMask.mask = 0xffffffff;
+        //特定のIP向かいの通信を遮断
+        //https://docs.microsoft.com/en-us/windows/win32/fwp/filtering-condition-identifiers-
+        fwpCondition.fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
+        fwpCondition.matchType = FWP_MATCH_EQUAL;
+        fwpCondition.conditionValue.type = FWP_V4_ADDR_MASK;
+        fwpCondition.conditionValue.v4AddrMask = &fwpAddrMask;
 
-    fwpFilter.filterCondition = &fwpCondition;
+        //ホストオーダーでIPを登録
+        fwpAddrMask.addr = elem.hexAddr;
+        fwpAddrMask.mask = 0xffffffff;
 
+        std::cerr << "Adding filter\n";
+        ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &elem.filterID);
+        if (ret != ERROR_SUCCESS)
+        {
+            std::cerr << "FwpmFilterAdd0 failed with error: " << ret << std::endl;
+            return ret;
+        }
+    }
 
-    std::cerr << "Adding filter\n";
-    ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &g_filterIDv4);
     return ret;
 }
 
@@ -178,8 +226,18 @@ DWORD RemoveSubLayer(void)
 
 DWORD RemoveFilter(void)
 {
-    std::cerr << "Removing Filter\n";
-    DWORD ret = FwpmFilterDeleteById0(g_hEngine, g_filterIDv4);
+    DWORD ret = ERROR_BAD_COMMAND;
+    for (auto& elem : g_vecFilterAddrInfo)
+    {
+        std::cerr << "Removing Filter\n";
+        ret = FwpmFilterDeleteById0(g_hEngine, elem.filterID);
+        if (ret != ERROR_SUCCESS)
+        {
+            std::cerr << "FwpmFilterDeleteById0 failed with error: " << ret << std::endl;
+            return ret;
+        }
+
+    }
     return ret;
 
 }
