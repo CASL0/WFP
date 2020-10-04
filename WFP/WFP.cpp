@@ -28,7 +28,7 @@ HANDLE g_hEngine = nullptr;
 GUID g_subLayerGUID = { 0 };
 
 //filterID
-UINT64 g_filterIDv4 = 0;
+UINT64 g_AllBlockfilterID = 0;
 
 //filter conditionに指定するIPアドレスリスト
 //stringフォーマットのIPアドレス
@@ -44,7 +44,8 @@ std::vector<FILTER_ADDR_INFO> g_vecFilterAddrInfo;
 //プロトタイプ宣言
 DWORD AddSubLayer(void);
 DWORD RemoveSubLayer(void);
-DWORD AddFilter(void);
+DWORD AddPermitFilter(void);
+DWORD AddBlockFilter(void);
 DWORD RemoveFilter(void);
 DWORD BuildFilterAddrInfo(std::vector<std::string> vecsAddr);
 
@@ -66,10 +67,17 @@ int main()
         return 1;
     }
 
-    ret = AddFilter();
+    ret = AddPermitFilter();
     if (ret != ERROR_SUCCESS)
     {
-        std::cerr << "AddFilter failed with error: " << ret << std::endl;
+        std::cerr << "AddPermitFilter failed with error: " << ret << std::endl;
+        return 1;
+    }
+
+    ret = AddBlockFilter();
+    if (ret != ERROR_SUCCESS)
+    {
+        std::cerr << "AddBlockFilter failed with error: " << ret << std::endl;
         return 1;
     }
 
@@ -161,7 +169,7 @@ DWORD BuildFilterAddrInfo(std::vector<std::string> vecsAddr)
     return ERROR_SUCCESS;
 }
 
-DWORD AddFilter(void)
+DWORD AddPermitFilter(void)
 {
     DWORD ret = ERROR_BAD_COMMAND;
 
@@ -183,7 +191,7 @@ DWORD AddFilter(void)
         //https://docs.microsoft.com/en-us/windows/win32/fwp/management-filtering-layer-identifiers-
         fwpFilter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
 
-        fwpFilter.action.type = FWP_ACTION_BLOCK;
+        fwpFilter.action.type = FWP_ACTION_PERMIT;
         fwpFilter.weight.type = FWP_EMPTY;
 
         fwpFilter.displayData.name = const_cast<wchar_t*>(L"IPv4Block");
@@ -215,6 +223,28 @@ DWORD AddFilter(void)
     return ret;
 }
 
+DWORD AddBlockFilter(void)
+{
+    DWORD ret = ERROR_BAD_COMMAND;
+
+    FWPM_FILTER0 fwpFilter = { 0 };
+    fwpFilter.subLayerKey = g_subLayerGUID;
+
+    fwpFilter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
+    fwpFilter.action.type = FWP_ACTION_BLOCK;
+    fwpFilter.weight.type = FWP_EMPTY;
+    fwpFilter.displayData.name = const_cast<wchar_t*>(L"ALLBlock");
+    fwpFilter.displayData.description = const_cast<wchar_t*>(L"Filter to block all outbound connections.");
+    
+    //numFilterConditionsを0に指定するとすべての通信を遮断
+    fwpFilter.numFilterConditions = 0;
+    
+    std::cerr << "Adding filter\n";
+    ret = FwpmFilterAdd0(g_hEngine, &fwpFilter, nullptr, &g_AllBlockfilterID);
+    return ret;
+
+}
+
 DWORD RemoveSubLayer(void)
 {
     std::cerr << "Removing SubLayer\n";
@@ -238,6 +268,7 @@ DWORD RemoveFilter(void)
         }
 
     }
+    ret = FwpmFilterDeleteById0(g_hEngine, g_AllBlockfilterID);
     return ret;
 
 }
