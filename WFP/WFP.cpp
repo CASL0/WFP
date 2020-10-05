@@ -34,8 +34,8 @@ UINT64 g_AllBlockfilterID = 0;
 //stringフォーマットのIPアドレス
 std::vector<std::string> g_vecsAddr =
 {
-    std::string("192.218.88.180"),
-    std::string("76.74.234.210"),
+    std::string("IP address"),
+    std::string("IP address"),
 };
 
 //
